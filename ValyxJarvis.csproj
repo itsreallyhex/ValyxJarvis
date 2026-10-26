@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Old-style project: every new .cs file needs a <Compile Include> line below. -->
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{8C2F5D17-3A9E-4B60-9E21-5D7A0C4B9F12}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>ValyxJarvis</RootNamespace>
+    <AssemblyName>ValyxJarvis</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <LangVersion>7.3</LangVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <!-- Required: build with /p:GamePath="<your Gorilla Tag folder>", or set a GamePath environment variable. -->
+    <GamePath Condition="'$(GamePath)' == ''"></GamePath>
+    <ManagedPath>$(GamePath)\Gorilla Tag_Data\Managed</ManagedPath>
+    <BepInExCorePath>$(GamePath)\BepInEx\core</BepInExCorePath>
+    <ScriptsPath>$(GamePath)\BepInEx\scripts</ScriptsPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The references Beacon.cs's header lists. -->
+    <Reference Include="BepInEx"><HintPath>$(BepInExCorePath)\BepInEx.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(BepInExCorePath)\0Harmony.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(ManagedPath)\UnityEngine.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedPath)\UnityEngine.CoreModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(ManagedPath)\UnityEngine.UI.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(ManagedPath)\UnityEngine.UIModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Unity.TextMeshPro"><HintPath>$(ManagedPath)\Unity.TextMeshPro.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.TextCoreFontEngineModule"><HintPath>$(ManagedPath)\UnityEngine.TextCoreFontEngineModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.TextCoreTextEngineModule"><HintPath>$(ManagedPath)\UnityEngine.TextCoreTextEngineModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ManagedPath)\UnityEngine.TextRenderingModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.AssetBundleModule"><HintPath>$(ManagedPath)\UnityEngine.AssetBundleModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.UnityWebRequestModule"><HintPath>$(ManagedPath)\UnityEngine.UnityWebRequestModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.AudioModule"><HintPath>$(ManagedPath)\UnityEngine.AudioModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.AnimationModule"><HintPath>$(ManagedPath)\UnityEngine.AnimationModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule"><HintPath>$(ManagedPath)\UnityEngine.ParticleSystemModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Photon3Unity3D"><HintPath>$(ManagedPath)\Photon3Unity3D.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PhotonRealtime"><HintPath>$(ManagedPath)\PhotonRealtime.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="PhotonUnityNetworking"><HintPath>$(ManagedPath)\PhotonUnityNetworking.dll</HintPath><Private>False</Private></Reference>
+    <!-- This mod's own code: the game's classes, the Input System (keys and the menu), XR input (VR push-to-talk). -->
+    <Reference Include="Assembly-CSharp"><HintPath>$(ManagedPath)\Assembly-CSharp.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Unity.InputSystem"><HintPath>$(ManagedPath)\Unity.InputSystem.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(ManagedPath)\UnityEngine.PhysicsModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="SteamVR"><HintPath>$(ManagedPath)\SteamVR.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.XRModule"><HintPath>$(ManagedPath)\UnityEngine.XRModule.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.SubsystemsModule"><HintPath>$(ManagedPath)\UnityEngine.SubsystemsModule.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Beacon.cs is copied in unchanged. -->
+    <Compile Include="Beacon.cs" />
+    <Compile Include="src\Plugin.cs" />
+    <Compile Include="src\Link.cs" />
+    <Compile Include="src\Actions.cs" />
+    <Compile Include="src\Overlay.cs" />
+    <Compile Include="src\Menu.cs" />
+    <Compile Include="src\Ui.cs" />
+    <Compile Include="src\ArabicShaper.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Fonts\NotoSansArabic-Regular.ttf"><LogicalName>ValyxJarvis.NotoSansArabic-Regular.ttf</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Fonts\OFL.txt"><LogicalName>ValyxJarvis.OFL.txt</LogicalName></EmbeddedResource>
+    <!-- The helper program, built first by build.ps1. Without it the DLL still builds and uses a helper already unpacked. -->
+    <EmbeddedResource Include="bin\helper\ValyxJarvis.exe" Condition="Exists('bin\helper\ValyxJarvis.exe')"><LogicalName>ValyxJarvis.Helper.exe</LogicalName></EmbeddedResource>
+  </ItemGroup>  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- Copies the DLL and PDB into BepInEx\scripts, where ScriptEngine reloads them while the game runs (dev loop only).
+       Skipped in CI or if the game is missing; ContinueOnError so a locked DLL warns instead of failing. -->
+  <Target Name="CopyToScripts" AfterTargets="Build" Condition="'$(CI)' != 'TRUE' And Exists('$(ScriptsPath)')">
+    <Copy SourceFiles="$(TargetPath);$(TargetDir)$(TargetName).pdb" DestinationFolder="$(ScriptsPath)" ContinueOnError="true" />
+  </Target>
+</Project>
