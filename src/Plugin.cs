@@ -13,7 +13,7 @@ namespace ValyxJarvis
     [BepInPlugin(Guid, "Valyx Jarvis", Version)]
     public class Plugin : BaseUnityPlugin
     {
-        public const string Guid = "dev.itsreallyhex.valyxjarvis", Version = "1.0.0";
+        public const string Guid = "dev.itsreallyhex.valyxjarvis", Version = "1.1.0";
 
         ConfigEntry<string> menuKey;
         ConfigEntry<bool> vrStickTalk;
@@ -27,17 +27,20 @@ namespace ValyxJarvis
             Ui.Init(Logger);
             Actions.Log = s => Logger.LogInfo(s);
             Travel.Log = s => Logger.LogInfo(s);
+            Rooms.Log = s => Logger.LogInfo(s);
             menuKey = Config.Bind("Controls", "MenuKey", "F8", "The key that opens the Jarvis menu in Desktop Mode (a Unity Input System key name, e.g. F8, F7, J).");
             vrStickTalk = Config.Bind("Controls", "VrHoldLeftStick", true, "In VR, hold the left thumbstick pressed in to talk to Jarvis (no wake word needed).");
             link = new Link(s => Logger.LogInfo(s));
             overlay = gameObject.AddComponent<Overlay>(); overlay.Link = link;
+            var hideOverlay = Config.Bind("Recording", "HideOverlay", false, "true: hide the dot and panel (for clean screen recordings). Jarvis still works and talks.");
+            overlay.ShowAll = () => !hideOverlay.Value;
             menu = gameObject.AddComponent<Menu>(); menu.Link = link;
             menu.DismissedNotices = Config.Bind("Notices", "DismissedVoiceTerms", "", "Voice-terms pages you pressed Later on (the popup stays away for these).");
             Key k; if (Enum.TryParse(menuKey.Value, true, out k)) menu.OpenKey = k; else Logger.LogWarning("MenuKey '" + menuKey.Value + "' is not a key name; using F8");
             Logger.LogInfo("Valyx Jarvis " + Version + " loaded. Say \"Jarvis\", hold the left stick in VR, or press " + menu.OpenKey + " in Desktop Mode for the menu.");
         }
 
-        void Start() { Beacon.Core.Load("Valyx Jarvis"); }
+        void Start() { Beacon.Core.Load("Valyx Jarvis", updates: "itsreallyhex/ValyxJarvis"); }   // players hear once when a newer release is out
 
         void Update()
         {
@@ -49,12 +52,12 @@ namespace ValyxJarvis
                     var a = link.NextAction(); if (a == null) break;
                     bool ok; string said;
                     bool ar = Json.S(link.State, "lang") == "ar";
+                    if (a.Type == "room") { var act = a; Rooms.Start(a.Value, ar, (ok2, text) => Report(act, ok2, text)); continue; }   // a join reports when it is done
                     if (a.Type == "menu") said = a.Value == "close" ? menu.CloseFromVoice(ar, out ok) : menu.OpenFromVoice(ar, out ok);   // the menu belongs to the plugin, not Actions
                     else said = Actions.Run(a, ar, out ok);
-                    overlay.ShowResult(said);
-                    // what really happened goes back, so Jarvis says the item he found, not what the AI guessed
-                    link.Send("result", new System.Collections.Generic.Dictionary<string, object> { { "id", a.Id ?? "" }, { "type", a.Type }, { "ok", ok }, { "text", said ?? "" } });
+                    Report(a, ok, said);
                 }
+                Rooms.Tick();
                 // Push-to-talk: the talk key (default V, set in the menu) while the game has focus and the menu is closed,
                 // or in VR the left thumbstick held in (Unity's own XR input; the game's poller has no stick click).
                 bool down = !menu.IsOpen && Application.isFocused && KeyHeld(Json.S(Json.O(link.State, "cfg"), "ptt", "V"));
@@ -75,6 +78,13 @@ namespace ValyxJarvis
             {
                 if (!failed) { failed = true; Logger.LogError("update: " + e); }
             }
+        }
+
+        /// <summary>What really happened goes back, so Jarvis says the item he found, not what the AI guessed.</summary>
+        void Report(GameAction a, bool ok, string said)
+        {
+            overlay.ShowResult(said);
+            link.Send("result", new System.Collections.Generic.Dictionary<string, object> { { "id", a.Id ?? "" }, { "type", a.Type }, { "ok", ok }, { "text", said ?? "" } });
         }
 
         object stickAction; float nextStickLookup; bool stickLogged;

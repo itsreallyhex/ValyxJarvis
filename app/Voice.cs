@@ -342,6 +342,9 @@ namespace ValyxJarvis
                 foreach (var w in new[] { "day", "daytime", "morning", "night", "midnight", "evening", "sunset", "dawn", "sunrise" })
                     l.Add(lead + " " + w);
             l.AddRange(new[] { "make it rain", "stop the rain", "clear the sky", "clear the weather", "take everything off", "reset the time", "put the time back to normal" });
+            // Harmless ones only: the always-on grammar force-fits other speech (0.82-0.89), and a false "leave the lobby" would throw
+            // the player out, so lobby commands come only through Whisper, typing or the held key's dictation.
+            l.AddRange(new[] { "what time is it", "what is the date", "speak arabic", "speak english" });
             return l.ToArray();
         }
 
