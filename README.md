@@ -21,6 +21,9 @@ Part of Valyx, a community for Gorilla Tag modding: join the [Discord](https://d
 - **Try on cosmetics:** *"Jarvis, try on a party hat"*, *"take it off"*. Only you see the try-on. If he can't find the item, he names close ones.
 - **Travel:** *"Jarvis, take me to Canyons"*, any map in the game. In a public lobby he leaves the lobby first.
 - **Room questions:** how many players, who is here, the room code, the game mode, how many are lava and how many are left (counts only), where am I.
+- **Lobbies:** *"Jarvis, leave the lobby"*, *"make a private room"* (he picks the code and tells you), *"join a random lobby"*, *"rejoin my last room"*. A join takes a few seconds; he says "One sec" and then tells you when you're in.
+- **Clock:** *"what time is it?"*, *"what's the date?"*, from your PC.
+- **Language:** *"Jarvis, speak Arabic"* / *"تكلم انجليزي"* switches his language.
 - **Chat:** ask him anything; he answers out loud, in English or Gulf Arabic.
 - **Settings by voice:** *"Jarvis, open settings"*.
 - **A floating dot** shows when Jarvis listens, thinks and talks, with a small panel showing what he heard and said.
@@ -80,6 +83,9 @@ Not affiliated with Another Axiom.
 - **تجربة الملابس:** *"جرب قبعة حفلة"* أو *"شيلها"*. التجربة تشوفها أنت بس.
 - **التنقل:** *"ودني الكانيون"*، أي ماب في اللعبة. في الروم العام يطلعك من الروم أول.
 - **أسئلة الروم:** كم لاعب، مين موجود، كود الروم، المود، كم واحد لافا وكم باقي (أرقام بس)، وين أنا.
+- **الرومات:** *"اطلع من الروم"*، *"سو لي روم خاص"* (هو يختار الكود ويقولك إياه)، *"دخلني روم عام"*، *"رجعني للروم اللي قبل"*. الدخول ياخذ ثواني، يقول "لحظة" وبعدين يعلمك إذا دخلت.
+- **الساعة:** *"كم الساعة؟"*، *"وش التاريخ؟"*، من جهازك.
+- **اللغة:** *"تكلم انجليزي"* أو *"Jarvis, speak Arabic"* يغير لغته.
 - **سوالف:** اسأله أي شي ويرد بالصوت، بالعربي الخليجي أو الإنجليزي.
 - **نقطة عائمة** توضح متى يسمع ويفكر ويتكلم، مع لوحة صغيرة فيها وش سمع ووش قال.
 

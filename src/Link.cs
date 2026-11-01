@@ -275,7 +275,8 @@ namespace ValyxJarvis
                         Directory.CreateDirectory(HelperDir);
                         if (File.Exists(stamp)) File.Delete(stamp);
                         // A helper from an older version may still run and lock its exe: ask it to quit first.
-                        if (File.Exists(exe)) { Send("quit", ""); Flush(); for (int i = 0; i < 30 && IsLocked(exe); i++) Thread.Sleep(100); }
+                        // Only when one runs: a "quit" left behind made the fresh helper quit at once (release test 2026-11-02: "try 2" 8 s later).
+                        if (File.Exists(exe) && IsLocked(exe)) { Send("quit", ""); Flush(); for (int i = 0; i < 30 && IsLocked(exe); i++) Thread.Sleep(100); }
                         File.WriteAllBytes(exe + ".new", bytes);
                         if (File.Exists(exe)) File.Delete(exe);
                         File.Move(exe + ".new", exe);

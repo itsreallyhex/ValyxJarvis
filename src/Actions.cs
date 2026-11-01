@@ -229,11 +229,15 @@ namespace ValyxJarvis
         /// <summary>"SkyJungle (Clouds)" -> "Sky Jungle (Clouds)"; "MonkeBlocks" -> "Monke Blocks".</summary>
         public static string Readable(string n) { return System.Text.RegularExpressions.Regex.Replace(n ?? "", "([a-z])([A-Z])", "$1 $2"); }
 
+        static SpawnPoint loading; static float loadDeadline, settleAt;
+
         public static void Tick(UnityEngine.Object owner)
         {
             var gp = GorillaLocomotion.GTPlayer.Instance;
-            if (held && Time.unscaledTime >= releaseAt) Release(owner);
-            if (target == null || gp == null) return;
+            if (held && loading == null && Time.unscaledTime >= releaseAt) Release(owner);
+            if (gp == null) return;
+            if (loading != null) { WaitForMap(gp); return; }
+            if (target == null) return;
             var ns = NetworkSystem.Instance;
             if (leaveDeadline > 0f && ns != null && ns.InRoom)
             {
@@ -241,21 +245,156 @@ namespace ValyxJarvis
                 Log("travel: the room did not let go in time; not moving"); target = null; return;
             }
             var sp = target; target = null;
-            var t = sp.transform;
-            gp.disableMovement = true; gp.SetGravityOverride(owner, null); held = true; releaseAt = Time.unscaledTime + 1.0f;
-            gp.TeleportTo(t.position, Quaternion.Euler(0f, t.eulerAngles.y, 0f), false, true);
+            // The map loads first and the player waits, held still with no gravity: a teleport onto a map that was still loading
+            // dropped the player through the world into the game's quit box and the game closed (Canyon from the forest, 2026-10-31).
+            gp.disableMovement = true; gp.SetGravityOverride(owner, null); gp.SetPlayerVelocity(Vector3.zero); held = true;
             ZoneManagement.SetActiveZone(sp.startZone);
+            loading = sp; loadDeadline = Time.unscaledTime + 20f; settleAt = 0f;
+            Log("travel: loading " + sp.startZone);
+        }
+
+        static void WaitForMap(GorillaLocomotion.GTPlayer gp)
+        {
+            gp.SetPlayerVelocity(Vector3.zero);   // no gravity, but a running start would still carry the player off
+            var zm = ZoneManagement.instance;
+            // IsZoneLoaded is false for zones without their own scene, so: no load still running and the zone switched on
+            bool ready = loading != null && zm != null && !zm.AnyActiveLoadOps() && zm.IsZoneActive(loading.startZone);
+            if (!ready && Time.unscaledTime < loadDeadline && loading != null) { settleAt = 0f; return; }
+            if (ready && settleAt == 0f) { settleAt = Time.unscaledTime + 0.3f; return; }   // a moment for the new map's colliders
+            if (ready && Time.unscaledTime < settleAt) return;
+            var sp = loading; loading = null; releaseAt = Time.unscaledTime + 1.0f;
+            if (sp == null) { Log("travel: the spawn point went away while loading; not moving"); return; }
+            if (!ready) Log("travel: the map did not finish loading in 20 s; moving anyway");
+            var t = sp.transform;
+            gp.TeleportTo(t.position, Quaternion.Euler(0f, t.eulerAngles.y, 0f), false, true);
             if (GorillaLocomotion.GTPlayerTransform.Instance != null) GorillaLocomotion.GTPlayerTransform.Instance.ClearAllGravityZones();
-            Log("travel -> " + targetKey + " at " + t.position + " (zone " + sp.startZone + ")");
+            Log("travel -> " + targetKey + " at " + t.position + " (zone " + sp.startZone + ", waited " + (20f - (loadDeadline - Time.unscaledTime)).ToString("0.0") + " s)");
         }
 
         public static void Release(UnityEngine.Object owner)
         {
+            loading = null;
             if (!held) return; held = false;
             var gp = GorillaLocomotion.GTPlayer.Instance;
             if (gp != null) { gp.disableMovement = false; gp.UnsetGravityOverride(owner); }
         }
     }
+    /// <summary>Lobbies by voice: leave, a new private room, a public lobby on this map, back to the room before. A join takes a few
+    /// seconds, so the result goes back when the game is done (or gives up), not at once. Nothing here joins a code the player says
+    /// or types: a private code is made here, and "rejoin" only returns to the room this game was in before (owner, 2026-11-01).
+    /// Game members verified 2026-11-01 (gt-context): PhotonNetworkController.AttemptToJoinSpecificRoomAsync (creates the room if
+    /// missing, private), GorillaComputer.primaryTriggersByZone + GorillaNetworkJoinTrigger.OnBoxTriggered (the game's own public join).</summary>
+    static class Rooms
+    {
+        const string Alphabet = "ABCDEFGHIJKLMNPQRSTUVWXYZ123456789";   // the game's own room-code alphabet (NetworkSystem.GetRandomRoomName)
+        public static Action<string> Log = s => { };
+        static string current = "", last = "";
+        static string kind, room, joinResult; static bool ar, joinSent, sawBusy; static float deadline, joinAt, idleSince;
+        static GorillaNetworkJoinTrigger trigger;
+        static Action<bool, string> done;
+
+        /// <summary>Starts a lobby command; done(ok, text) runs once, now or from Tick.</summary>
+        public static void Start(string what, bool arabic, Action<bool, string> reply)
+        {
+            var ns = NetworkSystem.Instance;
+            if (done != null) { reply(false, arabic ? "لحظة، باقي أخلص اللي قبل." : "Hang on, I'm still on the last one."); return; }
+            if (ns == null || PhotonNetworkController.Instance == null || GorillaComputer.instance == null) { reply(false, arabic ? "الشبكة مو جاهزة للحين." : "The network isn't ready yet."); return; }
+            kind = what; ar = arabic; room = null; trigger = null; joinResult = null; joinSent = false; sawBusy = false; idleSince = 0f;
+            switch (what)
+            {
+                case "leave":
+                    if (!ns.InRoom) { reply(false, arabic ? "أنت مو في روم." : "You're not in a lobby."); return; }
+                    break;
+                case "private":
+                    room = NewCode();
+                    break;
+                case "rejoin":
+                    if (last.Length == 0) { reply(false, arabic ? "ما أذكر روم قبل هذا." : "I don't remember a room from before."); return; }
+                    if (current == last) { reply(false, arabic ? "أنت أصلاً فيه." : "You're already in it."); return; }
+                    room = last;
+                    break;
+                case "public":
+                    trigger = TriggerHere();
+                    if (trigger == null) { reply(false, arabic ? "هذا الماب ما فيه رومات عامة." : "This map has no public lobbies."); return; }
+                    break;
+                default: reply(false, ""); return;
+            }
+            // the game looks for a code in every region (~5 s each) before it creates the room: 25 s in game (2026-11-01)
+            done = reply; deadline = Time.unscaledTime + (what == "leave" ? 10f : 40f);
+            if (ns.InRoom) { Log("rooms: leaving " + ns.RoomName + " for " + what); ns.ReturnToSinglePlayer(); }
+        }
+
+        /// <summary>Every frame: remembers the room before this one, and moves a running command on.</summary>
+        public static void Tick()
+        {
+            var ns = NetworkSystem.Instance; if (ns == null) return;
+            var now = ns.InRoom ? ns.RoomName ?? "" : "";
+            if (now != current) { if (current.Length > 0) last = current; current = now; }
+            if (done == null) return;
+            if (kind == "leave") { if (!ns.InRoom) Finish(true, ar ? "طلعتك من الروم." : "You left the lobby."); else Timeout(); return; }
+            if (!joinSent)
+            {
+                if (ns.InRoom || ns.netState != NetSystemState.Idle) { Timeout(); return; }   // still leaving the old room
+                joinSent = true; joinAt = Time.unscaledTime;
+                if (trigger != null) { Log("rooms: public join through the " + trigger.networkZone + " trigger"); trigger.OnBoxTriggered(); }
+                else
+                {
+                    Log("rooms: joining " + (kind == "private" ? "a new private room" : "the last room"));
+                    PhotonNetworkController.Instance.AttemptToJoinSpecificRoomAsync(room, JoinType.Solo, r => joinResult = r.ToString())
+                        .ContinueWith(t => joinResult = "error", System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
+                }
+                return;
+            }
+            if (ns.InRoom && (room == null || ns.RoomName == room))
+            {
+                if (kind == "private") Finish(true, ar ? "سويت لك روم خاص، الكود " + room + "." : "Made you a private room. The code is " + string.Join(" ", room.ToCharArray()) + ".");
+                else if (kind == "rejoin") Finish(true, ar ? "رجعتك للروم اللي قبل." : "Back in your last room.");
+                else Finish(true, ar ? "دخلتك روم عام." : "You're in a public lobby.");
+                return;
+            }
+            if (joinResult == "Failed_Full") { Finish(false, ar ? "الروم مليان." : "That room is full."); return; }
+            if (joinResult != null && joinResult != "Success" && joinResult != "FallbackCreated" && joinResult != "AlreadyInRoom") { Finish(false, ar ? "اللعبة ما دخلتني الروم." : "The game didn't let me in (" + joinResult + ")."); return; }
+            // The game gives up without telling anyone: back to Idle after trying. In game 2026-11-01 the server refused the Steam
+            // login (CustomAuthenticationFailed) within seconds, and the player waited 40 s for "the game didn't answer".
+            if (ns.netState != NetSystemState.Idle) { sawBusy = true; idleSince = 0f; }
+            else if (sawBusy)
+            {
+                if (idleSince == 0f) idleSince = Time.unscaledTime;
+                else if (Time.unscaledTime - idleSince > 2f) { Finish(false, ar ? "اللعبة ما قدرت تدخل روم، السيرفر رفض. جرب بعد شوي، وإذا تكرر سكر اللعبة وافتحها." : "The game couldn't get into a lobby; its servers said no. Try again in a bit, or restart the game if it keeps happening."); return; }
+            }
+            else if (Time.unscaledTime - joinAt > 6f) { Finish(false, ar ? "اللعبة ما بدت تدخل روم من هنا." : "The game wouldn't start a join from here."); return; }   // a blocked join never leaves Idle
+            Timeout();
+        }
+
+        static void Timeout() { if (Time.unscaledTime > deadline) Finish(false, ar ? "اللعبة ما ردت، جرب بعد شوي." : "The game didn't answer. Try again in a moment."); }
+
+        static void Finish(bool ok, string text)
+        {
+            var d = done; done = null; trigger = null;
+            Log("rooms: " + kind + (ok ? " ok" : " failed") + (joinResult != null ? " (" + joinResult + ")" : "") + ": " + text);
+            if (d != null) d(ok, text);
+        }
+
+        /// <summary>The public join box of the map the player is on, as the game registered it (not a subscribers-only one).</summary>
+        static GorillaNetworkJoinTrigger TriggerHere()
+        {
+            var zm = ZoneManagement.instance;
+            if (zm == null || zm.activeZones.Count == 0) return null;
+            var zone = zm.activeZones[0];
+            return GorillaComputer.instance.primaryTriggersByZone.Values.FirstOrDefault(t => t != null && t.zone == zone && !t.isSubsOnly);
+        }
+
+        static string NewCode()
+        {
+            for (int tries = 0; ; tries++)
+            {
+                var sb = new StringBuilder();
+                for (int i = 0; i < 6; i++) sb.Append(Alphabet[UnityEngine.Random.Range(0, Alphabet.Length)]);
+                if (tries > 20 || GorillaComputer.instance.CheckAutoBanListForName(sb.ToString())) return sb.ToString();   // the game's own word filter
+            }
+        }
+    }
+
     /// <summary>The game side: runs one action on the game thread and says what happened.</summary>
     static class Actions
     {
@@ -323,6 +462,10 @@ namespace ValyxJarvis
                 case CosmeticsController.CosmeticCategory.Chest: case CosmeticsController.CosmeticCategory.Fur: case CosmeticsController.CosmeticCategory.Shirt:
                 case CosmeticsController.CosmeticCategory.Back: case CosmeticsController.CosmeticCategory.Arms: case CosmeticsController.CosmeticCategory.Pants:
                 case CosmeticsController.CosmeticCategory.Set:
+                // body slots added by the game update of late October 2026 (ears, nose, glasses, eyes, mouth, hair, beard, neck, tattoo)
+                case CosmeticsController.CosmeticCategory.Ears: case CosmeticsController.CosmeticCategory.Nose: case CosmeticsController.CosmeticCategory.Glasses:
+                case CosmeticsController.CosmeticCategory.Eyes: case CosmeticsController.CosmeticCategory.Mouth: case CosmeticsController.CosmeticCategory.Hair:
+                case CosmeticsController.CosmeticCategory.FacialHair: case CosmeticsController.CosmeticCategory.Neck: case CosmeticsController.CosmeticCategory.Tattoo:
                     return true;
             }
             return false;   // held items, paws, tag effects and collectables need the game's own stands

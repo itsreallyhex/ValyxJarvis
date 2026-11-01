@@ -305,6 +305,7 @@ namespace ValyxJarvis
         public void Submit(string text, bool fromGame = false)
         {
             if (string.IsNullOrWhiteSpace(text)) return;
+            Say("typed: " + text.Trim());   // spoken requests log "heard:"; typed ones were invisible when one went wrong (2026-11-01)
             Run(() => Handle(text.Trim(), false));
         }
 
@@ -314,6 +315,7 @@ namespace ValyxJarvis
             Heard = LocalGrammar.Strip(text); Publish();
             bool ar = IsArabic(text);
             var reply = LocalGrammar.Parse(text, ar);
+            bool remember = reply != null;   // offline commands and AI answers; not error lines
             // Only "Jarvis": the AI got an empty message and guessed ("All set! ... maybe some weather?", 2026-10-26)
             if (reply == null && Heard.Length == 0) reply = new Reply { Say = T("yes", ar) };
             if (reply == null)
@@ -324,7 +326,7 @@ namespace ValyxJarvis
                 if (p.NeedsKey && key.Length == 0) reply = new Reply { Say = T(voice ? "hint" : "nokey", ar) };
                 else
                 {
-                    try { reply = await Ask(p, key, LocalGrammar.Strip(text), ar).ConfigureAwait(false); }
+                    try { reply = await Ask(p, key, LocalGrammar.Strip(text), ar).ConfigureAwait(false); remember = true; }
                     catch (ApiException e)
                     {
                         Say("provider: " + e.Kind + " " + e.Message);
@@ -333,6 +335,46 @@ namespace ValyxJarvis
                 }
             }
             await Reply(reply, ar).ConfigureAwait(false);
+            // Offline commands go into the AI's memory too: "make it night", then "is it still night?" found an empty memory (owner,
+            // 2026-11-01: "he forgets quickly"). Stored after Reply, so it holds what the game really did ("Trying on: 3D Glasses").
+            if (remember) Remember(Heard, reply);
+        }
+
+        /// <summary>One exchange for the AI's memory, short: its "say" clipped to 150 characters, the actions that ran (tokens, 2026-11-01).</summary>
+        void Remember(string user, Reply r)
+        {
+            if (string.IsNullOrEmpty(user)) return;
+            var say = r.Say ?? ""; if (say.Length > 150) say = say.Substring(0, 150);
+            history.Add(new Api.Turn { Role = "user", Text = user.Length > 200 ? user.Substring(0, 200) : user });
+            history.Add(new Api.Turn { Role = "assistant", Text = new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "say", say },
+                { "actions", r.Actions.Select(a => new Dictionary<string, object> { { "type", a.Type }, { "value", a.Value ?? "" } }).ToList() } }) });
+            if (history.Count > 20) history.RemoveRange(0, history.Count - 20);
+        }
+
+        // What Jarvis has set and the game confirmed: one short line for the AI, so "is it still night?" is right without a long memory.
+        string setTime = "", setWeather = "", setTryOn = "";
+
+        void Track(JAction a, Dictionary<string, object> result)
+        {
+            bool ok = result == null || !(result.ContainsKey("ok") && result["ok"] is bool && !(bool)result["ok"]);
+            if (!ok) return;
+            if (a.Type == "time") setTime = a.Value == "normal" ? "" : a.Value;
+            else if (a.Type == "weather") setWeather = a.Value == "normal" ? "" : a.Value;
+            else if (a.Type == "tryon_clear") setTryOn = "";
+            else if (a.Type == "tryon")
+            {
+                var text = Str(result, "text"); int c = text.IndexOf(':');   // "Trying on: Party Hat" / "تجرب: ..."
+                setTryOn = c >= 0 ? text.Substring(c + 1).Trim() : a.Value;
+            }
+        }
+
+        public string SetLine()
+        {
+            var parts = new List<string>();
+            if (setTime.Length > 0) parts.Add("time " + setTime);
+            if (setWeather.Length > 0) parts.Add("weather " + setWeather);
+            if (setTryOn.Length > 0) parts.Add("trying on " + setTryOn);
+            return parts.Count == 0 ? "" : "\nSet by you (still on unless changed since): " + string.Join("; ", parts) + ".";
         }
 
         readonly HashSet<string> refused = new HashSet<string>();   // models this provider would not run for this key
@@ -346,7 +388,9 @@ namespace ValyxJarvis
                 if (model.Length == 0) model = S.Model.Length > 0 ? S.Model : await PickModel(p, key).ConfigureAwait(false);
                 try
                 {
-                    raw = await Api.Chat(p, S, key, model, Brain.SystemPrompt(lang, GameContext()), history.Skip(Math.Max(0, history.Count - 6)).ToList(), text, CancellationToken.None).ConfigureAwait(false);
+                    // the map list (~115 tokens) only when the words ask to go somewhere; memory: the last 4 exchanges plus the "set" line
+                    var system = Brain.SystemPrompt(lang, GameContext(LocalGrammar.AsksTravel(text))) + SetLine() + "\nThe player's PC clock: " + Clock.Line(DateTime.Now) + ".";
+                    raw = await Api.Chat(p, S, key, model, system, history.Skip(Math.Max(0, history.Count - 8)).ToList(), text, CancellationToken.None).ConfigureAwait(false);
                     break;
                 }
                 // In game: Groq refused a model that needs terms acceptance (400). With "auto", move on to the next model.
@@ -360,9 +404,8 @@ namespace ValyxJarvis
             // Leaving a lobby on a guess is the worst mistake he can make: an AI travel runs only when the words asked for one.
             if (!LocalGrammar.AsksTravel(text) && reply.Actions.RemoveAll(a => a.Type == "travel") > 0)
             { Say("dropped a travel the player did not ask for"); reply.Say = T("didnt", ar); }
-            history.Add(new Api.Turn { Role = "user", Text = text });
-            history.Add(new Api.Turn { Role = "assistant", Text = raw.Length > 400 ? raw.Substring(0, 400) : raw });
-            if (history.Count > 12) history.RemoveRange(0, history.Count - 12);
+            if (!LocalGrammar.AsksRoom(text) && reply.Actions.RemoveAll(a => a.Type == "room") > 0)
+            { Say("dropped a lobby action the player did not ask for"); reply.Say = T("didnt", ar); }
             return reply;
         }
 
@@ -376,17 +419,36 @@ namespace ValyxJarvis
 
         async Task Reply(Reply r, bool ar)
         {
+            // "Speak Arabic": the setting changes here (like the menu would) and the answer is already in the new language.
+            var lang = r.Actions.LastOrDefault(a => a.Type == "lang");
+            if (lang != null)
+            {
+                r.Actions.RemoveAll(a => a.Type == "lang");
+                if (S.Language != lang.Value) { S.Language = lang.Value; if (Persist) S.Save(); ProbeVoices(); Say("language -> " + lang.Value + " (asked by voice)"); }
+                ar = lang.Value == "ar";
+            }
             // Questions about the room are answered here, from what the game wrote (counts and names, never positions).
             var info = r.Actions.Where(a => a.Type == "info").ToList();
             if (info.Count > 0) { r.Say = string.Join(" ", info.Select(a => Info(a.Value, ar))); r.Actions.RemoveAll(a => a.Type == "info"); }
             if (string.IsNullOrEmpty(r.Say) && r.Actions.Count == 0) r.Say = T("didnt", ar);
 
             // Send the actions; for a try-on wait for what the game really found and say that, not what the AI guessed.
-            var waits = new List<Task<Dictionary<string, object>>>();
+            var waits = new List<Task<Dictionary<string, object>>>(); Task<Dictionary<string, object>> slow = null;
+            var sent = new List<KeyValuePair<JAction, Task<Dictionary<string, object>>>>();
             foreach (var a in r.Actions)
             {
-                var id = Link.SendAction(a, r.Say);
-                if (a.Type == "tryon" || a.Type == "tryon_clear" || a.Type == "travel" || a.Type == "menu") waits.Add(Expect(id, 2500));   // say what the game really did
+                var id = Link.SendAction(a, r.Say); Task<Dictionary<string, object>> t = null;
+                if (a.Type == "tryon" || a.Type == "tryon_clear" || a.Type == "travel" || a.Type == "menu") waits.Add(t = Expect(id, 2500));   // say what the game really did
+                else if (a.Type == "room" && a.Value == "leave") waits.Add(t = Expect(id, 12000));
+                else if (a.Type == "room") slow = Expect(id, 45000);
+                sent.Add(new KeyValuePair<JAction, Task<Dictionary<string, object>>>(a, t));
+            }
+            // A join took 16-25 s in game: "One sec..." now and the game's result when it comes, without keeping Jarvis busy.
+            // A quick answer ("You're already in it") replaces the "One sec" instead of following it.
+            if (slow != null)
+            {
+                if (await Task.WhenAny(slow, Task.Delay(1000)).ConfigureAwait(false) == slow) waits.Add(slow);
+                else FollowUp(slow, ar);
             }
             bool failed = false;
             if (waits.Count > 0)
@@ -396,13 +458,14 @@ namespace ValyxJarvis
                 failed = results.Any(x => x != null && x.ContainsKey("ok") && x["ok"] is bool && !(bool)x["ok"]);
                 if (texts.Count > 0) r.Say = string.Join(" ", texts);
             }
+            foreach (var s in sent) Track(s.Key, s.Value != null && s.Value.IsCompleted ? s.Value.Result : null);
             if (string.IsNullOrEmpty(r.Say)) r.Say = T("done", ar);
             Said = r.Say; Interlocked.Increment(ref sayId);
             Say("said: " + r.Say + (r.Actions.Count > 0 ? "   [" + string.Join(", ", r.Actions.Select(a => a.Type + (a.Value.Length > 0 ? " " + a.Value : ""))) + "]" : "") + (r.Local ? "  (offline)" : ""));
 
             // An offline command that worked needs no words: a short tone, and the panel shows the line.
-            // Travel is always said out loud: leaving a lobby must never be a surprise.
-            if (r.Local && info.Count == 0 && !failed && r.Actions.Count > 0 && !r.Actions.Any(a => a.Type == "travel"))
+            // Travel and lobby changes are always said out loud: leaving a lobby must never be a surprise.
+            if (r.Local && info.Count == 0 && !failed && r.Actions.Count > 0 && !r.Actions.Any(a => a.Type == "travel" || a.Type == "room"))
             {
                 speaker.ChimeDone();
                 SetState("idle");
@@ -413,6 +476,17 @@ namespace ValyxJarvis
             try { await speaker.Say(r.Say, ar).ConfigureAwait(false); }
             finally { await Task.Delay(150).ConfigureAwait(false); if (h != null) h.Muted = false; }
             SetState("idle");
+        }
+
+        /// <summary>Says the game's result of a slow action later, without keeping Jarvis busy meanwhile (the plugin gives up after 40 s).</summary>
+        void FollowUp(Task<Dictionary<string, object>> result, bool ar)
+        {
+            Task.Run(async () =>
+            {
+                var res = await result.ConfigureAwait(false);
+                var text = res != null ? Str(res, "text") : (ar ? "اللعبة ما ردت علي." : "The game never answered.");
+                if (text.Length > 0) Run(() => Reply(new Reply { Say = text }, ar));
+            });
         }
 
         Task<Dictionary<string, object>> Expect(string id, int ms)
@@ -436,6 +510,7 @@ namespace ValyxJarvis
         /// <summary>An answer about the room. Never where anyone is.</summary>
         public string Info(string kind, bool ar)
         {
+            if (kind == "clock" || kind == "date") return Clock.Say(DateTime.Now, ar, kind == "date");   // the PC clock, no game needed
             var g = Link.Game();
             if (g == null) return ar ? "ما أشوف اللعبة الحين." : "I can't see the game right now.";
             object inRoom;
@@ -490,12 +565,12 @@ namespace ValyxJarvis
         }
 
         /// <summary>One line about the room for the AI: room, player count and names, mode. No positions.</summary>
-        string GameContext()
+        string GameContext(bool withMaps)
         {
             var g = Link.Game();
             if (g == null) return "";
             var where = MapName(Str(g, "zone"), false);
-            var maps = LocalGrammar.MapCatalog();
+            var maps = withMaps ? LocalGrammar.MapCatalog() : null;
             var mapsLine = maps != null ? " Maps the player can travel to: " + string.Join(", ", maps) + "." : "";
             object inRoom; if (!(g.TryGetValue("inRoom", out inRoom) && inRoom is bool && (bool)inRoom)) return "the player is not in a room" + (where.Length > 0 ? ", on the map " + where : "") + "." + mapsLine;
             bool you; var names = Names(g, out you);
